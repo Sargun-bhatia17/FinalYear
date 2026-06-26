@@ -267,6 +267,25 @@ class DataRepository:
         row = self._conn.execute("SELECT COUNT(*) FROM behavioral_sessions").fetchone()
         return int(row[0])
 
+    def get_pending_unknown_sessions(self) -> list[dict]:
+        """
+        Fetches all sessions with calculated_state='Unknown', ordered oldest-first.
+
+        These are sessions awaiting retroactive state resolution by Protocol P4.
+        Returns the full session dict so the rule engine can inspect age and category.
+        """
+        rows = self._conn.execute(
+            """
+            SELECT id, start_time, end_time, primary_process, primary_category,
+                   scroll_velocity, input_density, has_text_selection,
+                   calculated_state, attention_risk_score
+            FROM behavioral_sessions
+            WHERE calculated_state = 'Unknown'
+            ORDER BY start_time ASC
+            """
+        ).fetchall()
+        return [self._row_to_session_dict(row) for row in rows]
+
     # ── Taxonomy ──────────────────────────────────────────────────────────────
 
     def lookup_taxonomy(self, process_or_keyword: str) -> str | None:

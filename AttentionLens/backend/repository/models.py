@@ -115,3 +115,48 @@ class RawEvent(TypedDict):
     keystroke_count: int
     mouse_click_count: int
     scroll_delta_y: int
+
+
+# Single source of truth for all valid attention state labels.
+# Every function that assigns a state MUST validate against this set.
+# Raising immediately on an invalid value prevents silent session record corruption.
+VALID_STATES: frozenset[str] = frozenset({
+    "Deep_Work",
+    "Pondering",
+    "Passive_Leisure",
+    "Idle_Away",
+    "Active_Meeting",
+    "Unknown",
+})
+
+
+@dataclass(frozen=True, slots=True)
+class RuleResult:
+    """
+    Strongly-typed output of RuleEngine.evaluate().
+
+    Attributes:
+        fired_protocol:      Protocol identifier that fired (e.g. "P1_DSA_PONDERING"),
+                             or None if no rule matched (passthrough).
+        assigned_state:      Final state string — must be a member of VALID_STATES.
+        risk_score_override: Clamped risk score in [0.0, 1.0].
+        confidence:          1.0 if a hard rule fired; 0.0 for passthrough.
+        reason:              Human-readable description of the trigger for audit logs.
+    """
+
+    fired_protocol:      str | None
+    assigned_state:      str
+    risk_score_override: float
+    confidence:          float
+    reason:              str
+
+    def __post_init__(self) -> None:
+        if self.assigned_state not in VALID_STATES:
+            raise ValueError(
+                f"RuleResult.assigned_state={self.assigned_state!r} is not in VALID_STATES. "
+                f"Allowed values: {sorted(VALID_STATES)}"
+            )
+        # Clamp risk score defensively — callers should already clamp, but belt-and-suspenders.
+        if not (0.0 <= self.risk_score_override <= 1.0):
+            object.__setattr__(self, "risk_score_override",
+                               max(0.0, min(1.0, self.risk_score_override)))

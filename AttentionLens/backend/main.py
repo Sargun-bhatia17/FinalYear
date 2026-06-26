@@ -2,7 +2,8 @@ import datetime
 import time
 
 from backend.repository.repository import DataRepository
-from backend.repository.models import SessionRecord
+from backend.repository.models import SessionRecord, VALID_STATES
+from backend.logic.rule_engine import PONDERING_SOFT_ALERT_MIN
 from backend.tracker.tracker import Tracker, RawEventSnapshot
 from backend.logic.behavior_engine import (
     calculate_interaction_density,
@@ -43,6 +44,7 @@ class MainApp:
         self.poll_count = 0
         self.window_events_buffer: list[dict] = []
         self.consecutive_high_risk_sessions = 0
+        self.pondering_streak_minutes: int = 0
 
     def start(self):
         self.tracker.start()
@@ -157,16 +159,34 @@ class MainApp:
         has_selection = total_clicks > 15
 
         primary_title = buffer[0]["title"]
-        rule_state, rule_risk, rule_override = self.rule_engine.evaluate_rules(
-            window_title=primary_title,
-            primary_category=primary_category,
-            input_density=raw_input_density,
-            scroll_velocity=raw_scroll_velocity,
-            duration_seconds=60.0,
-            recent_process=primary_proc,
-        )
-
         feat_vector = self.feature_engineer.build_feature_vector()
+
+        # Gather pending unknown session context for P3/P4
+        pending_sessions = self.repository.get_pending_unknown_sessions()
+        pending_queue_length = len(pending_sessions)
+        pending_duration_s = 0.0
+        if pending_sessions:
+            try:
+                oldest_ts = pending_sessions[0]["start_time"]
+                oldest_dt = datetime.datetime.strptime(oldest_ts, "%Y-%m-%d %H:%M:%S")
+                pending_duration_s = (datetime.datetime.now() - oldest_dt).total_seconds()
+            except Exception:
+                pending_duration_s = 0.0
+
+        rule_result = self.rule_engine.evaluate(
+            feature_vector=feat_vector,
+            window_title=primary_title,
+            process_name=primary_proc,
+            pending_unknown_duration_s=pending_duration_s,
+            pending_queue_length=pending_queue_length,
+            most_recent_category=primary_category,
+        )
+        rule_override = rule_result.fired_protocol is not None
+        rule_state = rule_result.assigned_state
+        rule_risk  = rule_result.risk_score_override
+
+        # Sync pondering streak from rule engine stateful context
+        self.pondering_streak_minutes = self.rule_engine.pondering_streak_minutes
 
         import numpy as np
         classifier_input = np.array([
@@ -186,6 +206,10 @@ class MainApp:
             rule_risk_score=rule_risk,
             rule_override_triggered=rule_override,
         )
+
+        # Ensure final state is VALID_STATES-compliant; fall back to Unknown
+        if final_state not in VALID_STATES:
+            final_state = "Unknown"
 
         try:
             session_rec = SessionRecord(
@@ -223,6 +247,25 @@ class MainApp:
         else:
             self.consecutive_high_risk_sessions = 0
             self.api_server.update_state("current_alert", None)
+
+        # Pondering soft alert — fires once when streak reaches threshold
+        if (self.rule_engine.soft_alert_triggered
+                and self.pondering_streak_minutes >= PONDERING_SOFT_ALERT_MIN):
+            pondering_alert = {
+                "alert_trigger": "Pondering_Depth_Threshold",
+                "primary_cause": (
+                    f"You have been in deep analysis for "
+                    f"{self.pondering_streak_minutes} continuous minutes."
+                ),
+                "actionable_prompt": (
+                    "This appears to be intentional problem-solving. "
+                    "Remember to stretch if you are stuck."
+                ),
+                "suggested_action": "Acknowledge",
+            }
+            self.api_server.trigger_alert(pondering_alert)
+            # Reset flag so the alert doesn't fire every minute after threshold
+            self.rule_engine.soft_alert_triggered = False
 
         self.api_server.update_state("attention_score", final_risk)
         self.api_server.update_state("calculated_state", final_state)
