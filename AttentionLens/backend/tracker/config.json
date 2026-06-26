@@ -1,0 +1,111 @@
+{
+  "version": "1.0",
+  "description": "AttentionLens baseline category rules and keyword classification config.",
+
+  "categories": {
+    "Core_Tool": {
+      "description": "Primary productivity and development tools. High attention expected.",
+      "processes": [
+        "code.exe",
+        "pycharm64.exe",
+        "idea64.exe",
+        "sublime_text.exe",
+        "atom.exe",
+        "figma.exe",
+        "xd.exe",
+        "postman.exe",
+        "dbeaver.exe",
+        "windowsterminal.exe",
+        "powershell.exe",
+        "cmd.exe",
+        "wt.exe"
+      ],
+      "title_keywords": [
+        "visual studio code",
+        "vs code",
+        "pycharm",
+        "intellij",
+        "figma",
+        "terminal",
+        "powershell",
+        "git bash"
+      ]
+    },
+
+    "Supporting_Tool": {
+      "description": "Research, documentation, and reference materials. Moderate attention.",
+      "processes": [
+        "chrome.exe",
+        "msedge.exe",
+        "firefox.exe",
+        "brave.exe",
+        "notion.exe",
+        "obsidian.exe"
+      ],
+      "title_keywords": [
+        "stackoverflow",
+        "github",
+        "leetcode",
+        "docs",
+        "documentation",
+        "arxiv",
+        "wikipedia",
+        "medium",
+        "coursera",
+        "udemy",
+        "notion",
+        "tutorial",
+        "coursework",
+        "mdn web docs",
+        "python docs"
+      ]
+    },
+
+    "Leisure": {
+      "description": "Entertainment and social media. High risk of focus disruption.",
+      "processes": [
+        "spotify.exe",
+        "discord.exe",
+        "slack.exe",
+        "teams.exe"
+      ],
+      "title_keywords": [
+        "youtube",
+        "netflix",
+        "twitter",
+        "reddit",
+        "facebook",
+        "instagram",
+        "twitch",
+        "manga",
+        "chapter",
+        "comic",
+        "feed",
+        "reels",
+        "shorts",
+        "tiktok",
+        "scroll"
+      ]
+    }
+  },
+
+  "pondering_keywords": [
+    "leetcode",
+    "github",
+    "docs",
+    "coursework",
+    "tutorial",
+    "arxiv",
+    "stackoverflow",
+    "problem",
+    "algorithm",
+    "solution"
+  ],
+
+  "tracking": {
+    "poll_interval_seconds": 1,
+    "flush_interval_seconds": 5,
+    "session_interval_seconds": 60,
+    "idle_threshold_seconds": 180
+  }
+}
