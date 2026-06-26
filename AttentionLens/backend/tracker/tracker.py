@@ -33,7 +33,10 @@ import time
 from collections import Counter, deque
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Callable, Deque, Optional
+from typing import Callable, Deque, Optional, Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from backend.repository.repository import DataRepository
 
 logger = logging.getLogger(__name__)
 
@@ -399,21 +402,21 @@ class InputCounter:
             logger.error("Failed to restart input listeners: %s", exc)
             return False
 
-    def _on_key_press(self, key) -> None:
+    def _on_key_press(self, key: Any) -> None:
         # PRIVACY: `key` is intentionally never read, logged, or stored.
         try:
             self._event_queue.put_nowait(self._KEY)
         except queue.Full:
             pass
 
-    def _on_click(self, x, y, button, pressed: bool) -> None:
+    def _on_click(self, x: int | float, y: int | float, button: Any, pressed: bool) -> None:
         if pressed:
             try:
                 self._event_queue.put_nowait(self._CLICK)
             except queue.Full:
                 pass
 
-    def _on_scroll(self, x, y, dx, dy) -> None:
+    def _on_scroll(self, x: int | float, y: int | float, dx: int | float, dy: int | float) -> None:
         try:
             self._event_queue.put_nowait(("scroll", int(dy * self.SCROLL_MULTIPLIER)))
         except queue.Full:
@@ -474,10 +477,26 @@ class Tracker:
       3. Write to repository (with retry queue on failure)
       4. Invoke optional on_flush callback
     """
+    _raw_config: dict
+    _tracker_config: TrackerConfig
+    _dev_mode: bool
+    _repository: Optional[DataRepository]
+    _on_flush: Optional[Callable[[RawEventSnapshot], None]]
+    _window: WindowInspector
+    _inputs: InputCounter
+    _thread: Optional[threading.Thread]
+    _running: bool
+    _retry_queue: Deque[RawEventSnapshot]
+    _lock: threading.Lock
+    _events_written: int
+    _flush_count: int
+    _last_flush_at: Optional[str]
+    _last_error: Optional[str]
+    _mode: str
 
     def __init__(
         self,
-        repository=None,
+        repository: Optional[DataRepository] = None,
         config: dict | None = None,
         tracker_config: TrackerConfig | None = None,
         on_flush: Callable[[RawEventSnapshot], None] | None = None,
