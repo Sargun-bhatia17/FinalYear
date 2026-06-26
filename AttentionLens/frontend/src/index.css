@@ -1,0 +1,86 @@
+/* AttentionLens Premium Dark theme design tokens */
+:root {
+  --bg-color: #07090e;
+  --bg-surface: #0e131f;
+  --bg-card: #151d30;
+  --border-color: rgba(255, 255, 255, 0.08);
+  --border-active: rgba(138, 43, 226, 0.4);
+  
+  /* Focus colors */
+  --color-deep-work: #00f5a0;
+  --color-pondering: #00d2ff;
+  --color-leisure: #ff007f;
+  --color-idle: #8b9bb4;
+  
+  /* Text */
+  --text-primary: #f0f3f8;
+  --text-secondary: #8b9bb4;
+  --text-muted: #576880;
+  
+  /* Accents */
+  --accent-purple: #8a2be2;
+  --accent-purple-glow: rgba(138, 43, 226, 0.35);
+  
+  font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--bg-color);
+  color: var(--text-primary);
+  min-height: 100vh;
+  overflow-x: hidden;
+  line-height: 1.5;
+}
+
+/* Beautiful scrolling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-color);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--bg-card);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-active);
+}
+
+/* Global layouts */
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+/* Premium Card (Glassmorphism layout) */
+.glass-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  padding: 1.5rem;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.glass-card:hover {
+  border-color: var(--border-active);
+  box-shadow: 0 12px 40px 0 rgba(138, 43, 226, 0.15);
+}
+
+/* Text Selection Glow */
+::selection {
+  background: var(--accent-purple-glow);
+  color: #fff;
+}
