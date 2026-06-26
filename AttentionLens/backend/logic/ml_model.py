@@ -31,14 +31,15 @@ class AttentionClassifier:
         self.model = RandomForestClassifier(n_estimators=10, max_depth=3, random_state=42)
         
         # Dummy data: [f0 (density), f1 (scroll), f2 (entropy), f3 (core ratio), f4 (time of day)]
+        # Features are normalized to [0.0 - 1.0] range where appropriate.
         # Target classes: 0: "Deep Work", 1: "Pondering", 2: "Passive Leisure", 3: "Idle_Away"
         X_dummy = np.array([
-            [50.0, 0.0, 0.0, 1.0, 10.0],  # high input, zero scroll, zero entropy, core app -> Deep Work
-            [20.0, 2.0, 0.5, 0.9, 14.0],  # moderate input, core app -> Deep Work
-            [1.0, 1.0, 0.0, 1.0, 11.0],   # low input, low scroll, core app -> Pondering
-            [2.0, 50.0, 0.2, 0.0, 15.0],  # low input, high scroll, leisure -> Passive Leisure
-            [0.0, 0.0, 0.0, 0.0, 16.0],   # zero inputs -> Idle_Away
-            [0.0, 0.0, 0.8, 0.5, 20.0],   # zero inputs, high entropy -> Idle_Away
+            [0.5, 0.0, 0.0, 1.0, 10.0],  # high input, zero scroll, zero entropy, core app -> Deep Work
+            [0.2, 0.05, 0.2, 0.9, 14.0], # moderate input, core app -> Deep Work
+            [0.01, 0.01, 0.0, 1.0, 11.0],# low input, low scroll, core app -> Pondering
+            [0.02, 0.5, 0.2, 0.0, 15.0], # low input, high scroll, leisure -> Passive Leisure
+            [0.0, 0.0, 0.0, 0.0, 16.0],  # zero inputs -> Idle_Away
+            [0.0, 0.0, 0.8, 0.5, 20.0],  # zero inputs, high entropy -> Idle_Away
         ])
         y_dummy = np.array([0, 0, 1, 2, 3, 3])
         

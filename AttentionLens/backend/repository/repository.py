@@ -256,7 +256,7 @@ class DataRepository:
             "primary_process":      str(row["primary_process"]),
             "primary_category":     str(row["primary_category"]),
             "scroll_velocity":      float(row["scroll_velocity"]),
-            "input_density":        int(row["input_density"]),
+            "input_density":        float(row["input_density"]),
             "has_text_selection":   bool(row["has_text_selection"]),
             "calculated_state":     str(row["calculated_state"]),
             "attention_risk_score": float(row["attention_risk_score"]),
@@ -308,6 +308,16 @@ class DataRepository:
             )
             for row in rows
         }
+
+    def get_taxonomy_snapshot(self) -> dict[str, str]:
+        """
+        Returns a simplified taxonomy dictionary mapping lowercase process/keyword -> category.
+
+        Returns:
+            Dict mapping lowercase process name or keyword -> category string.
+        """
+        taxonomy = self.get_taxonomy()
+        return {k: cat for k, (cat, _) in taxonomy.items()}
 
     def upsert_taxonomy(
         self,

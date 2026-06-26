@@ -12,7 +12,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
+from enum import Enum
+from typing import Optional, TypedDict
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,7 +42,7 @@ class SessionRecord:
     primary_process:      str
     primary_category:     str
     scroll_velocity:      float
-    input_density:        int
+    input_density:        float
     has_text_selection:   bool
     calculated_state:     str
     attention_risk_score: float
@@ -85,3 +86,32 @@ class TaxonomyEntry:
     process_or_keyword: str
     assigned_category:  str
     confidence_weight:  float = 1.0
+
+
+class DataQuality(str, Enum):
+    FULL         = "FULL"
+    PARTIAL      = "PARTIAL"
+    INSUFFICIENT = "INSUFFICIENT"
+
+
+@dataclass(frozen=True, slots=True)
+class FeatureVector:
+    timestamp: datetime
+    interaction_density: float      # normalized 0.0–1.0
+    scroll_velocity: float          # normalized 0.0–1.0
+    context_entropy: float          # normalized 0.0–1.0
+    category_distance: float        # already 0.0–1.0
+    core_tool_ratio: float          # 0.0–1.0
+    time_of_day: float              # 0.0–23.99
+    data_quality: DataQuality
+    raw_event_count: int
+
+
+class RawEvent(TypedDict):
+    id: int
+    timestamp: str
+    process_name: str
+    window_title: str
+    keystroke_count: int
+    mouse_click_count: int
+    scroll_delta_y: int

@@ -1,66 +1,68 @@
+"""
+feature_engineer.py
+-------------------
+Orchestrates raw event metrics extraction and builds FeatureVector objects.
+Contains no direct math; acts purely as a coordinator delegating to behavior_engine.
+"""
+
 import datetime
-from typing import List, Dict, Any, Tuple
-import numpy as np
+import logging
+from backend.repository.models import FeatureVector, RawEvent
+from backend.logic.behavior_engine import (
+    calculate_interaction_density,
+    calculate_scroll_velocity,
+    calculate_context_entropy,
+    calculate_category_distance,
+    assess_data_quality,
+)
+
+logger = logging.getLogger(__name__)
+
 
 class FeatureEngineer:
+    """Coordinator class to extract features and build FeatureVector."""
+
     def __init__(self, repository):
+        """Inject repository dependency from outside."""
         self.repository = repository
 
-    def get_time_of_day_index(self, dt: datetime.datetime = None) -> float:
-        """
-        Calculates time-of-day float index (e.g., 14.5 = 2:30 PM)
-        """
-        if dt is None:
-            dt = datetime.datetime.now()
-        return dt.hour + (dt.minute / 60.0) + (dt.second / 3600.0)
+    def build_feature_vector(self) -> FeatureVector:
+        """Assembles a FeatureVector by calling pure calculator functions."""
+        events: list[RawEvent] = self.repository.get_last_n_minutes_events(5)
+        taxonomy: dict[str, str] = self.repository.get_taxonomy_snapshot()
 
-    def build_feature_vector(self, 
-                             current_input_density: int, 
-                             current_scroll_velocity: float, 
-                             current_entropy: float,
-                             current_category: str) -> Tuple[np.ndarray, Dict[str, Any]]:
-        """
-        Builds a 5-dimensional feature vector f0-f4.
-        Returns:
-            Tuple[np.ndarray, dict]: (5D numpy array, dictionary of raw values)
-        """
-        # Fetch the last 5 sessions (approx. 5 minutes of data) to calculate averages
-        recent_sessions = self.repository.get_all_sessions(limit=5)
-        
-        # Include current window's prospective data
-        all_densities = [current_input_density]
-        all_scrolls = [current_scroll_velocity]
-        categories_count = 1 if current_category == "Core_Tool" else 0
-        total_count = 1
-        
-        for sess in recent_sessions:
-            if isinstance(sess, dict):
-                density = sess["input_density"]
-                scroll = sess["scroll_velocity"]
-                category = sess["primary_category"]
-            else:
-                density = sess[6]
-                scroll = sess[5]
-                category = sess[4]
+        # Call calculators
+        density = calculate_interaction_density(events)
+        scroll = calculate_scroll_velocity(events)
+        entropy = calculate_context_entropy(events, taxonomy)
+        distance = calculate_category_distance(events, taxonomy)
 
-            all_densities.append(density)
-            all_scrolls.append(scroll)
-            if category == "Core_Tool":
-                categories_count += 1
-            total_count += 1
-            
-        f0 = float(np.mean(all_densities))
-        f1 = float(np.mean(all_scrolls))
-        f2 = current_entropy
-        f3 = float(categories_count / total_count)
-        f4 = self.get_time_of_day_index()
-        
-        vector = np.array([f0, f1, f2, f3, f4], dtype=np.float32)
-        raw_dict = {
-            "mean_interaction_density": f0,
-            "mean_scroll_velocity": f1,
-            "context_entropy": f2,
-            "core_tool_ratio": f3,
-            "time_of_day_index": f4
-        }
-        return vector, raw_dict
+        # Compute core tool ratio
+        core_tool_count = sum(
+            1 for ev in events
+            if taxonomy.get((ev.get("process_name") or "").lower()) == "Core_Tool"
+        )
+        core_ratio = core_tool_count / len(events) if events else 0.0
+
+        # Compute current time of day
+        now_dt = datetime.datetime.now()
+        time_of_day = now_dt.hour + now_dt.minute / 60.0
+
+        # Assess data quality
+        quality = assess_data_quality(len(events), 300)
+
+        # Construct vector
+        vector = FeatureVector(
+            timestamp=now_dt,
+            interaction_density=density,
+            scroll_velocity=scroll,
+            context_entropy=entropy,
+            category_distance=distance,
+            core_tool_ratio=core_ratio,
+            time_of_day=time_of_day,
+            data_quality=quality,
+            raw_event_count=len(events),
+        )
+
+        logger.debug("Generated FeatureVector: %s", vector)
+        return vector

@@ -4,7 +4,11 @@ import time
 from backend.repository.repository import DataRepository
 from backend.repository.models import SessionRecord
 from backend.tracker.tracker import Tracker, RawEventSnapshot
-from backend.logic.behavior_engine import BehaviorEngine
+from backend.logic.behavior_engine import (
+    calculate_interaction_density,
+    calculate_scroll_velocity,
+    calculate_context_entropy,
+)
 from backend.logic.rule_engine import RuleEngine
 from backend.logic.feature_engineer import FeatureEngineer
 from backend.logic.ml_model import AttentionClassifier
@@ -19,7 +23,6 @@ class MainApp:
 
         self.repository = DataRepository()
 
-        self.behavior_engine = BehaviorEngine()
         self.rule_engine = RuleEngine(self.repository)
         self.feature_engineer = FeatureEngineer(self.repository)
         self.classifier = AttentionClassifier()
@@ -122,46 +125,59 @@ class MainApp:
             process_counts[p] = process_counts.get(p, 0) + 1
         primary_proc = max(process_counts, key=process_counts.get)
 
-        taxonomy = self.repository.get_taxonomy()
-        primary_category, _ = taxonomy.get(primary_proc.lower(), ("Supporting_Tool", 1.0))
+        # Convert buffer to list of RawEvent typed dicts for the calculators
+        events = []
+        for i, e in enumerate(buffer):
+            # Estimate timestamp for each 5-second event in the buffer
+            t_offset = (len(buffer) - 1 - i) * 5
+            ev_time = end_time - datetime.timedelta(seconds=t_offset)
+            events.append({
+                "id": i,
+                "timestamp": ev_time.strftime("%Y-%m-%d %H:%M:%S"),
+                "process_name": e["process"],
+                "window_title": e["title"],
+                "keystroke_count": e["keystrokes"],
+                "mouse_click_count": e["clicks"],
+                "scroll_delta_y": e["scroll_y"],
+            })
+
+        taxonomy_snapshot = self.repository.get_taxonomy_snapshot()
+        primary_category = taxonomy_snapshot.get(primary_proc.lower(), "Supporting_Tool")
+
+        input_density = calculate_interaction_density(events)
+        scroll_velocity = calculate_scroll_velocity(events)
+        entropy = calculate_context_entropy(events, taxonomy_snapshot)
 
         total_keystrokes = sum(e["keystrokes"] for e in buffer)
         total_clicks = sum(e["clicks"] for e in buffer)
         total_scroll = sum(e["scroll_y"] for e in buffer)
 
-        input_density = self.behavior_engine.calculate_interaction_density(
-            total_keystrokes, total_clicks
-        )
-        scroll_velocity = self.behavior_engine.calculate_scroll_velocity(
-            total_scroll, duration_seconds=60.0
-        )
-
+        raw_input_density = total_keystrokes + total_clicks
+        raw_scroll_velocity = abs(total_scroll) / 60.0
         has_selection = total_clicks > 15
-
-        categories = []
-        for e in buffer:
-            cat, _ = taxonomy.get(e["process"].lower(), ("Supporting_Tool", 1.0))
-            categories.append(cat)
-        entropy = self.behavior_engine.calculate_context_switching_entropy(categories)
 
         primary_title = buffer[0]["title"]
         rule_state, rule_risk, rule_override = self.rule_engine.evaluate_rules(
             window_title=primary_title,
             primary_category=primary_category,
-            input_density=input_density,
-            scroll_velocity=scroll_velocity,
+            input_density=raw_input_density,
+            scroll_velocity=raw_scroll_velocity,
             duration_seconds=60.0,
             recent_process=primary_proc,
         )
 
-        feat_vector, _ = self.feature_engineer.build_feature_vector(
-            current_input_density=input_density,
-            current_scroll_velocity=scroll_velocity,
-            current_entropy=entropy,
-            current_category=primary_category,
-        )
+        feat_vector = self.feature_engineer.build_feature_vector()
 
-        ml_state, ml_risk = self.classifier.predict(feat_vector)
+        import numpy as np
+        classifier_input = np.array([
+            feat_vector.interaction_density,
+            feat_vector.scroll_velocity,
+            feat_vector.context_entropy,
+            feat_vector.core_tool_ratio,
+            feat_vector.time_of_day
+        ], dtype=np.float32)
+
+        ml_state, ml_risk = self.classifier.predict(classifier_input)
 
         final_state, final_risk = self.fusion_engine.fuse_scores(
             ml_predicted_state=ml_state,
