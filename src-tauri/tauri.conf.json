@@ -1,0 +1,32 @@
+// tauri.conf.json — Tauri Application Configuration
+// Configures: app metadata, sidecar process permissions, window settings
+{
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devPath": "http://localhost:3000",
+    "distDir": "../frontend/dist"
+  },
+  "tauri": {
+    "allowlist": {
+      "all": false,
+      "shell": {
+        "sidecar": true
+      }
+    },
+    "bundle": {
+      "active": true,
+      "identifier": "com.attentionlens.app",
+      "icon": []
+    },
+    "windows": [
+      {
+        "title": "AttentionLens",
+        "width": 1200,
+        "height": 800,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ]
+  }
+}

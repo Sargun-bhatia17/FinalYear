@@ -1,0 +1,20 @@
+# AttentionLens — Python Engine Dependencies
+# ==========================================
+# Install with: pip install -r requirements.txt
+
+# OS Window Hooks
+pywin32           # Windows active window querying (use AppKit on macOS)
+
+# Input Tracking
+pynput            # Global keyboard/mouse delta capture (privacy-safe)
+
+# Machine Learning
+scikit-learn      # Random Forest Classifier
+joblib            # Model serialization & hot-swap (.joblib binary)
+numpy             # Numerical arrays for feature vectors
+pandas            # Data wrangling for feature engineering
+
+# Local IPC Server
+websockets        # WebSocket server for Tauri ↔ Python IPC
+fastapi           # Optional: HTTP REST API alternative
+uvicorn           # ASGI server for FastAPI
