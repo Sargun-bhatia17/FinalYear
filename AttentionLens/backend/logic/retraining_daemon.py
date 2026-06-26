@@ -59,12 +59,18 @@ class RetrainingDaemon(threading.Thread):
         y = []
         
         for sess in sessions:
-            # sess fields: id, start_time, end_time, primary_process, primary_category, 
-            #              scroll_velocity, input_density, has_text_selection, calculated_state, attention_risk_score
-            scroll_vel = sess[5]
-            input_dens = sess[6]
-            category = sess[4]
-            state = sess[8]
+            if isinstance(sess, dict):
+                scroll_vel = sess["scroll_velocity"]
+                input_dens = sess["input_density"]
+                category = sess["primary_category"]
+                state = sess["calculated_state"]
+                start_time_str = sess["start_time"]
+            else:
+                scroll_vel = sess[5]
+                input_dens = sess[6]
+                category = sess[4]
+                state = sess[8]
+                start_time_str = sess[1]
             
             # Reconstruct basic features (f0-f4) for training from DB
             f0 = float(input_dens)
@@ -75,7 +81,7 @@ class RetrainingDaemon(threading.Thread):
             
             # Format time-of-day float
             try:
-                dt = datetime.datetime.strptime(sess[1], "%Y-%m-%d %H:%M:%S")
+                dt = datetime.datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
                 f4 = dt.hour + (dt.minute / 60.0)
             except Exception:
                 f4 = 12.0

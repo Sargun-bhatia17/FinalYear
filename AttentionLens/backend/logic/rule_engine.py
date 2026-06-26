@@ -68,28 +68,27 @@ class RuleEngine:
         if current_category == "Core_Tool" and input_density > 20:
             # Check the last 5 sessions (approx 5 mins) and rewrite any 'Pondering' or 'Idle_Away' that were passive.
             recent_sessions = self.repository.get_all_sessions(limit=5)
-            with self.repository.get_connection() as conn:
-                cursor = conn.cursor()
-                for sess in recent_sessions:
-                    sess_id, start, end, proc, cat, scroll, density, select, state, risk = sess
-                    if state in ["Pondering", "Idle_Away"] and density <= 2:
-                        cursor.execute("""
-                        UPDATE behavioral_sessions
-                        SET calculated_state = 'Deep Work', attention_risk_score = 0.0
-                        WHERE id = ?
-                        """, (sess_id,))
-                conn.commit()
+            for sess in recent_sessions:
+                if isinstance(sess, dict):
+                    sess_id = sess["id"]
+                    state = sess["calculated_state"]
+                    density = sess["input_density"]
+                else:
+                    sess_id, _, _, _, _, _, density, _, state, _ = sess
+
+                if state in ["Pondering", "Idle_Away"] and density <= 2:
+                    self.repository.update_session_state(sess_id, "Deep Work", 0.0)
+
         # Branch B: User transitions to Leisure or system goes idle (input_density == 0) -> rewrite to 'Idle_Away'
         elif current_category == "Leisure":
             recent_sessions = self.repository.get_all_sessions(limit=5)
-            with self.repository.get_connection() as conn:
-                cursor = conn.cursor()
-                for sess in recent_sessions:
-                    sess_id, start, end, proc, cat, scroll, density, select, state, risk = sess
-                    if state == "Pondering" and density <= 1:
-                        cursor.execute("""
-                        UPDATE behavioral_sessions
-                        SET calculated_state = 'Idle_Away', attention_risk_score = 0.9
-                        WHERE id = ?
-                        """, (sess_id,))
-                conn.commit()
+            for sess in recent_sessions:
+                if isinstance(sess, dict):
+                    sess_id = sess["id"]
+                    state = sess["calculated_state"]
+                    density = sess["input_density"]
+                else:
+                    sess_id, _, _, _, _, _, density, _, state, _ = sess
+
+                if state == "Pondering" and density <= 1:
+                    self.repository.update_session_state(sess_id, "Idle_Away", 0.9)

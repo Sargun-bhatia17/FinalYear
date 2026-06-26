@@ -1,79 +1,99 @@
 """
-repository.py
--------------
+repository.py (Revised Phase 1, Step 1.3)
+------------------------------------------
 DataRepository: The single gateway between all backend logic and the SQLite database.
 
-All database read/write operations for AttentionLens go through this class.
-No SQL should be written outside this file.
+Code quality contract:
+  - Context manager (``__enter__`` / ``__exit__``)
+  - Single persistent ``sqlite3.Connection`` (check_same_thread=False, isolation_level=None)
+  - Every public method is fully type-annotated
+  - No bare ``except:`` — only specific exception types
+  - Parameterized queries exclusively (``?`` placeholders, never string formatting)
+  - Methods are 15-30 lines max; longer logic is extracted to private helpers
+  - ``logging`` module only — zero ``print()`` statements
+  - Zero module-level side effects; instantiation is the only trigger
 
-Usage:
+Usage::
+
     from backend.repository.repository import DataRepository
-    from backend.repository.database_manager import initialize_database
 
-    db_path = initialize_database()
-    repo = DataRepository(db_path)
-    repo.insert_raw_log("Code.exe", "main.py - VSCode", 42, 3, -240)
+    with DataRepository() as repo:
+        row_id = repo.insert_raw_event("Code.exe", "main.py - VSCode", 42, 3, -240)
+        events = repo.get_last_n_minutes_events(5)
 """
 
-import sqlite3
-from datetime import datetime, timedelta
-from typing import List, Optional, Tuple, Dict
+from __future__ import annotations
 
-from backend.repository.database_manager import get_connection, initialize_database
+import json
+import logging
+import sqlite3
+from pathlib import Path
+from typing import Optional
+
+from backend.repository.db_init import initialize, get_db_path, get_seeds_path
+from backend.repository.models import SessionRecord, RawEventRecord
+
+logger = logging.getLogger(__name__)
 
 
 class DataRepository:
     """
-    Repository pattern class that encapsulates all SQLite operations for AttentionLens.
+    Repository-pattern gateway to the AttentionLens SQLite database.
 
-    Provides named, purpose-built methods for raw event logging, session management,
-    retroactive state correction, and taxonomy management.
+    Implements the context-manager protocol for deterministic cleanup.
+    All SQL uses parameterized ``?`` placeholders — never string interpolation.
     """
 
-    def __init__(self, db_path: str = None):
+    # ── Lifecycle ─────────────────────────────────────────────────────────────
+
+    def __init__(self, db_path: Optional[str] = None) -> None:
         """
-        Initializes the repository.
+        Opens (or creates) the database and establishes a persistent connection.
 
         Args:
             db_path: Optional override to the database file path.
-                     Defaults to data/attention_lens.db via database_manager.
+                     Defaults to ``data/attention_lens.db`` via db_init.
         """
-        self.db_path = initialize_database(db_path)
+        self._db_path: str = initialize(db_path)
+        self._conn: sqlite3.Connection = self._open_connection()
+        logger.info("DataRepository initialized — db: %s", self._db_path)
 
-    def _conn(self) -> sqlite3.Connection:
-        """Internal helper: returns a fresh connection for each operation."""
-        return get_connection(self.db_path)
+    def _open_connection(self) -> sqlite3.Connection:
+        """Creates the single persistent connection with required settings."""
+        conn = sqlite3.connect(
+            self._db_path,
+            check_same_thread=False,
+            isolation_level=None,       # autocommit OFF — we use explicit tx
+        )
+        conn.row_factory = sqlite3.Row
+        # Re-apply pragmas on the persistent connection
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+        conn.execute("PRAGMA foreign_keys=ON;")
+        conn.execute("PRAGMA cache_size=-16000;")
+        return conn
+
+    def __enter__(self) -> DataRepository:
+        """Context-manager entry — returns self."""
+        return self
+
+    def __exit__(self, exc_type: type | None, exc_val: BaseException | None,
+                 exc_tb: object | None) -> None:
+        """Context-manager exit — closes the persistent connection."""
+        self.close()
+
+    def close(self) -> None:
+        """Explicitly closes the persistent database connection."""
+        if self._conn:
+            self._conn.close()
+            logger.info("DataRepository connection closed.")
+
+    @property
+    def db_path(self) -> str:
+        """Read-only access to the database file path."""
+        return self._db_path
 
     # ── Raw Window Events ─────────────────────────────────────────────────────
-
-    def insert_raw_log(
-        self,
-        process_name: str,
-        window_title: str,
-        keys: int,
-        clicks: int,
-        scrolls: int
-    ) -> None:
-        """
-        Inserts a single raw 5-second polling record into raw_window_events.
-        This is the primary write path called by the tracker threads.
-
-        Args:
-            process_name: Active process binary name (e.g., "Code.exe").
-            window_title:  Active window title string.
-            keys:          Number of keystrokes detected in this interval.
-            clicks:        Number of mouse clicks detected in this interval.
-            scrolls:       Vertical scroll delta (pixels, signed).
-        """
-        with self._conn() as conn:
-            conn.execute(
-                """
-                INSERT INTO raw_window_events
-                    (process_name, window_title, keystroke_count, mouse_click_count, scroll_delta_y)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (process_name, window_title, keys, clicks, scrolls)
-            )
 
     def insert_raw_event(
         self,
@@ -81,131 +101,129 @@ class DataRepository:
         title: str,
         keys: int,
         clicks: int,
-        scroll: int
-    ) -> None:
+        scroll: int,
+    ) -> int:
         """
-        Alias for insert_raw_log matching Step 1.3 spec naming.
-        Both names are valid and do the same thing.
-        """
-        self.insert_raw_log(process, title, keys, clicks, scroll)
-
-    def get_last_5_minutes_events(self) -> List[sqlite3.Row]:
-        """
-        Fetches all raw_window_events from the last 5 minutes, ordered ascending.
-        Used by the behavior engine when computing the 60-second session aggregate.
-
-        Returns:
-            List of sqlite3.Row objects with columns:
-            id, timestamp, process_name, window_title,
-            keystroke_count, mouse_click_count, scroll_delta_y
-        """
-        with self._conn() as conn:
-            rows = conn.execute(
-                """
-                SELECT id, timestamp, process_name, window_title,
-                       keystroke_count, mouse_click_count, scroll_delta_y
-                FROM raw_window_events
-                WHERE timestamp >= datetime('now', '-5 minutes')
-                ORDER BY timestamp ASC
-                """
-            ).fetchall()
-        return rows
-
-    def get_recent_raw_events(self, seconds: int = 60) -> List[sqlite3.Row]:
-        """
-        Fetches raw_window_events from the last N seconds.
+        Inserts a single 5-second raw polling record into raw_window_events.
 
         Args:
-            seconds: Number of seconds to look back (default 60).
+            process: Active process binary name (e.g., "Code.exe").
+            title:   Active window title string.
+            keys:    Number of keystrokes detected in this interval.
+            clicks:  Number of mouse clicks detected in this interval.
+            scroll:  Vertical scroll delta (pixels, signed integer).
 
         Returns:
-            List of sqlite3.Row objects ordered ascending by timestamp.
+            The auto-generated row ID of the inserted record.
         """
-        with self._conn() as conn:
-            rows = conn.execute(
-                """
-                SELECT id, timestamp, process_name, window_title,
-                       keystroke_count, mouse_click_count, scroll_delta_y
-                FROM raw_window_events
-                WHERE timestamp >= datetime('now', ?)
-                ORDER BY timestamp ASC
-                """,
-                (f"-{seconds} seconds",)
-            ).fetchall()
-        return rows
+        cursor = self._conn.execute(
+            """
+            INSERT INTO raw_window_events
+                (process_name, window_title, keystroke_count,
+                 mouse_click_count, scroll_delta_y)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (process, title, keys, clicks, scroll),
+        )
+        self._conn.commit()
+        row_id = cursor.lastrowid
+        logger.debug("Inserted raw event id=%d process=%s", row_id, process)
+        return row_id
+
+    def get_last_n_minutes_events(self, n: int = 5) -> list[dict]:
+        """
+        Fetches raw_window_events from the last *n* minutes.
+
+        Args:
+            n: Number of minutes to look back (default 5).
+
+        Returns:
+            List of typed dicts (not raw tuples) with all event columns.
+        """
+        rows = self._conn.execute(
+            """
+            SELECT id, timestamp, process_name, window_title,
+                   keystroke_count, mouse_click_count, scroll_delta_y
+            FROM raw_window_events
+            WHERE timestamp >= datetime('now', ?)
+            ORDER BY timestamp ASC
+            """,
+            (f"-{n} minutes",),
+        ).fetchall()
+
+        return [self._row_to_event_dict(row) for row in rows]
+
+    def _row_to_event_dict(self, row: sqlite3.Row) -> dict:
+        """Converts a sqlite3.Row into a plain typed dict."""
+        return {
+            "id":                int(row["id"]),
+            "timestamp":         str(row["timestamp"]),
+            "process_name":      str(row["process_name"]),
+            "window_title":      str(row["window_title"]),
+            "keystroke_count":   int(row["keystroke_count"]),
+            "mouse_click_count": int(row["mouse_click_count"]),
+            "scroll_delta_y":    int(row["scroll_delta_y"]),
+        }
 
     # ── Behavioral Sessions ───────────────────────────────────────────────────
 
-    def insert_session(
-        self,
-        start_time: str,
-        end_time: str,
-        process: str,
-        category: str,
-        scroll_velocity: float,
-        input_density: int,
-        has_text_selection: bool,
-        calculated_state: str,
-        attention_risk_score: float
-    ) -> int:
+    def insert_session(self, session: SessionRecord) -> int:
         """
-        Inserts a completed 60-second behavioral session into behavioral_sessions.
+        Inserts a completed 60-second behavioral session.
+
+        Args:
+            session: A ``SessionRecord`` dataclass (not raw args).
 
         Returns:
             The auto-generated row ID of the inserted session.
         """
-        with self._conn() as conn:
-            cursor = conn.execute(
-                """
-                INSERT INTO behavioral_sessions
-                    (start_time, end_time, primary_process, primary_category,
-                     scroll_velocity, input_density, has_text_selection,
-                     calculated_state, attention_risk_score)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (start_time, end_time, process, category, scroll_velocity,
-                 input_density, has_text_selection, calculated_state, attention_risk_score)
-            )
-            return cursor.lastrowid
+        cursor = self._conn.execute(
+            """
+            INSERT INTO behavioral_sessions
+                (start_time, end_time, primary_process, primary_category,
+                 scroll_velocity, input_density, has_text_selection,
+                 calculated_state, attention_risk_score)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            self._session_to_tuple(session),
+        )
+        self._conn.commit()
+        row_id = cursor.lastrowid
+        logger.debug("Inserted session id=%d state=%s", row_id, session.calculated_state)
+        return row_id
 
-    def update_session_state(self, session_id: int, new_state: str) -> None:
+    def _session_to_tuple(self, s: SessionRecord) -> tuple:
+        """Extracts a SessionRecord into the column-ordered tuple for INSERT."""
+        return (
+            s.start_time, s.end_time, s.primary_process, s.primary_category,
+            s.scroll_velocity, s.input_density, s.has_text_selection,
+            s.calculated_state, s.attention_risk_score,
+        )
+
+    def update_session_state(self, session_id: int, new_state: str, risk_score: Optional[float] = None) -> None:
         """
-        Retroactively corrects the calculated_state of a past behavioral session.
+        Retroactively corrects the calculated_state of a past session.
         Used exclusively by Protocol 4 — Rewriting History.
 
         Args:
             session_id: The row ID of the session to correct.
             new_state:  The corrected state string (e.g., "Deep Work" or "Idle_Away").
+            risk_score: Optional risk score to set.
         """
-        with self._conn() as conn:
-            conn.execute(
-                """
-                UPDATE behavioral_sessions
-                SET calculated_state = ?
-                WHERE id = ?
-                """,
-                (new_state, session_id)
+        if risk_score is not None:
+            self._conn.execute(
+                "UPDATE behavioral_sessions SET calculated_state = ?, attention_risk_score = ? WHERE id = ?",
+                (new_state, risk_score, session_id),
             )
-
-    def update_session_risk(self, session_id: int, new_risk_score: float) -> None:
-        """
-        Retroactively updates the attention_risk_score for a past session.
-
-        Args:
-            session_id:    The row ID of the session to update.
-            new_risk_score: The corrected risk score (0.0 → 1.0).
-        """
-        with self._conn() as conn:
-            conn.execute(
-                """
-                UPDATE behavioral_sessions
-                SET attention_risk_score = ?
-                WHERE id = ?
-                """,
-                (new_risk_score, session_id)
+        else:
+            self._conn.execute(
+                "UPDATE behavioral_sessions SET calculated_state = ? WHERE id = ?",
+                (new_state, session_id),
             )
+        self._conn.commit()
+        logger.info("Rewrote session %d state -> %s (risk -> %s)", session_id, new_state, risk_score)
 
-    def get_all_sessions(self, limit: int = 100) -> List[sqlite3.Row]:
+    def get_all_sessions(self, limit: int = 100) -> list[dict]:
         """
         Fetches the most recent behavioral sessions, newest first.
 
@@ -213,83 +231,190 @@ class DataRepository:
             limit: Maximum number of rows to return (default 100).
 
         Returns:
-            List of sqlite3.Row objects.
+            List of typed dicts with all session columns.
         """
-        with self._conn() as conn:
-            rows = conn.execute(
-                """
-                SELECT id, start_time, end_time, primary_process, primary_category,
-                       scroll_velocity, input_density, has_text_selection,
-                       calculated_state, attention_risk_score
-                FROM behavioral_sessions
-                ORDER BY id DESC
-                LIMIT ?
-                """,
-                (limit,)
-            ).fetchall()
-        return rows
+        rows = self._conn.execute(
+            """
+            SELECT id, start_time, end_time, primary_process, primary_category,
+                   scroll_velocity, input_density, has_text_selection,
+                   calculated_state, attention_risk_score
+            FROM behavioral_sessions
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+        return [self._row_to_session_dict(row) for row in rows]
+
+    def _row_to_session_dict(self, row: sqlite3.Row) -> dict:
+        """Converts a sqlite3.Row into a plain typed dict for sessions."""
+        return {
+            "id":                   int(row["id"]),
+            "start_time":           str(row["start_time"]),
+            "end_time":             str(row["end_time"]),
+            "primary_process":      str(row["primary_process"]),
+            "primary_category":     str(row["primary_category"]),
+            "scroll_velocity":      float(row["scroll_velocity"]),
+            "input_density":        int(row["input_density"]),
+            "has_text_selection":   bool(row["has_text_selection"]),
+            "calculated_state":     str(row["calculated_state"]),
+            "attention_risk_score": float(row["attention_risk_score"]),
+        }
 
     def get_session_count(self) -> int:
         """Returns the total number of behavioral sessions stored."""
-        with self._conn() as conn:
-            row = conn.execute("SELECT COUNT(*) FROM behavioral_sessions").fetchone()
-        return row[0]
-
-    def get_last_n_sessions(self, n: int) -> List[sqlite3.Row]:
-        """
-        Fetches the last N sessions ordered by newest first.
-        Used by the retraining daemon and Protocol 4.
-        """
-        return self.get_all_sessions(limit=n)
+        row = self._conn.execute("SELECT COUNT(*) FROM behavioral_sessions").fetchone()
+        return int(row[0])
 
     # ── Taxonomy ──────────────────────────────────────────────────────────────
 
-    def get_taxonomy(self) -> Dict[str, Tuple[str, float]]:
+    def lookup_taxonomy(self, process_or_keyword: str) -> str | None:
         """
-        Returns the full user taxonomy as a dictionary for fast lookup.
+        Looks up a single keyword in the taxonomy table.
+
+        Args:
+            process_or_keyword: The process name or window-title keyword to look up.
 
         Returns:
-            Dict mapping lowercase keyword → (category, confidence_weight).
-            e.g., {"code.exe": ("Core_Tool", 1.0), "youtube": ("Leisure", 1.0)}
+            The category string ("Core_Tool", "Supporting_Tool", "Leisure")
+            or ``None`` if the keyword is not in the taxonomy.
         """
-        with self._conn() as conn:
-            rows = conn.execute(
-                "SELECT process_or_keyword, assigned_category, confidence_weight FROM user_taxonomy"
-            ).fetchall()
-        return {row["process_or_keyword"].lower(): (row["assigned_category"], row["confidence_weight"])
-                for row in rows}
+        row = self._conn.execute(
+            "SELECT assigned_category FROM user_taxonomy WHERE process_or_keyword = ?",
+            (process_or_keyword.lower().strip(),),
+        ).fetchone()
+
+        if row is None:
+            return None
+        return str(row["assigned_category"])
+
+    def get_taxonomy(self) -> dict[str, tuple[str, float]]:
+        """
+        Returns the full taxonomy as a dictionary for batch lookups.
+
+        Returns:
+            Dict mapping lowercase keyword -> (category, confidence_weight).
+        """
+        rows = self._conn.execute(
+            "SELECT process_or_keyword, assigned_category, confidence_weight "
+            "FROM user_taxonomy"
+        ).fetchall()
+
+        return {
+            str(row["process_or_keyword"]).lower(): (
+                str(row["assigned_category"]),
+                float(row["confidence_weight"]),
+            )
+            for row in rows
+        }
 
     def upsert_taxonomy(
         self,
         keyword: str,
         category: str,
-        confidence: float = 1.0
+        confidence: float = 1.0,
     ) -> None:
         """
-        Inserts or updates a keyword → category mapping in user_taxonomy.
-        INSERT OR REPLACE ensures no duplicates on the unique keyword column.
+        Inserts or updates a single taxonomy entry.
 
         Args:
-            keyword:    The app name, process name, or window title keyword.
+            keyword:    The app name, process name, or title keyword.
             category:   One of "Core_Tool", "Supporting_Tool", or "Leisure".
             confidence: Trust weight for this mapping (default 1.0).
         """
-        with self._conn() as conn:
-            conn.execute(
-                """
-                INSERT INTO user_taxonomy (process_or_keyword, assigned_category, confidence_weight)
-                VALUES (?, ?, ?)
-                ON CONFLICT(process_or_keyword) DO UPDATE SET
-                    assigned_category    = excluded.assigned_category,
-                    confidence_weight    = excluded.confidence_weight
-                """,
-                (keyword.lower().strip(), category, confidence)
-            )
+        self._conn.execute(
+            """
+            INSERT INTO user_taxonomy (process_or_keyword, assigned_category, confidence_weight)
+            VALUES (?, ?, ?)
+            ON CONFLICT(process_or_keyword) DO UPDATE SET
+                assigned_category  = excluded.assigned_category,
+                confidence_weight  = excluded.confidence_weight
+            """,
+            (keyword.lower().strip(), category, confidence),
+        )
+        self._conn.commit()
+        logger.debug("Upserted taxonomy: %s -> %s (%.2f)", keyword, category, confidence)
 
-    def categorize(self, process_name: str, window_title: str) -> Tuple[str, float]:
+    def seed_taxonomy(self, seeds_path: Optional[Path] = None) -> int:
         """
-        Resolves a process name and window title to a taxonomy category.
+        Bulk-inserts taxonomy seeds from a JSON file. Skips on conflict.
+
+        Args:
+            seeds_path: Path to the JSON seeds file.
+                        Defaults to taxonomy_seeds.json in this directory.
+
+        Returns:
+            Count of rows inserted (0 if table was already populated).
+        """
+        if seeds_path is None:
+            seeds_path = get_seeds_path()
+
+        return self._load_and_insert_seeds(seeds_path)
+
+    def _load_and_insert_seeds(self, seeds_path: Path) -> int:
+        """Reads JSON and performs the bulk insert."""
+        if not seeds_path.exists():
+            logger.warning("Seeds file not found: %s", seeds_path)
+            return 0
+
+        existing = self._conn.execute("SELECT COUNT(*) FROM user_taxonomy").fetchone()[0]
+        if existing > 0:
+            logger.info("Taxonomy has %d entries — skipping seed.", existing)
+            return 0
+
+        with open(seeds_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        seeds = data.get("seeds", [])
+        rows = [(s["keyword"].lower().strip(), s["category"], s["confidence"]) for s in seeds]
+
+        self._conn.executemany(
+            "INSERT OR IGNORE INTO user_taxonomy "
+            "(process_or_keyword, assigned_category, confidence_weight) VALUES (?, ?, ?)",
+            rows,
+        )
+        self._conn.commit()
+
+        count = self._conn.execute("SELECT COUNT(*) FROM user_taxonomy").fetchone()[0]
+        logger.info("Taxonomy seeded: %d rows from %s", count, seeds_path.name)
+        return count
+
+    # ── Maintenance ───────────────────────────────────────────────────────────
+
+    def daily_prune(self, retain_days: int = 30) -> int:
+        """
+        Deletes old raw_window_events older than *retain_days*.
+
+        This prevents the raw events table from growing unbounded on disk.
+        Behavioral sessions are never pruned (they are the processed output).
+
+        Args:
+            retain_days: Number of days of raw events to keep (default 30).
+
+        Returns:
+            Number of rows deleted.
+        """
+        cursor = self._conn.execute(
+            "DELETE FROM raw_window_events WHERE timestamp <= datetime('now', ?)",
+            (f"-{retain_days} days",),
+        )
+        self._conn.commit()
+        deleted = cursor.rowcount
+        logger.info(
+            "Daily prune: deleted %d raw events older than %d days.",
+            deleted, retain_days,
+        )
+        return deleted
+
+    # ── Categorize helper ─────────────────────────────────────────────────────
+
+    def categorize(self, process_name: str, window_title: str) -> tuple[str, float]:
+        """
+        Resolves a process name + window title to a taxonomy category.
+
         Checks both process name and title substrings against all known keywords.
+        Prioritizes longer (more specific) keyword matches.
 
         Returns:
             Tuple of (category, confidence_weight).
@@ -297,15 +422,20 @@ class DataRepository:
         """
         taxonomy = self.get_taxonomy()
         search_text = f"{process_name} {window_title}".lower()
+        return self._best_match(taxonomy, search_text)
 
-        best_match_category = "Supporting_Tool"
-        best_match_confidence = 0.5
+    def _best_match(
+        self,
+        taxonomy: dict[str, tuple[str, float]],
+        search_text: str,
+    ) -> tuple[str, float]:
+        """Finds the highest-confidence keyword match in the search text."""
+        best_cat = "Supporting_Tool"
+        best_conf = 0.5
 
         for keyword, (category, confidence) in taxonomy.items():
-            if keyword in search_text:
-                # Give priority to more specific / longer keyword matches
-                if confidence >= best_match_confidence:
-                    best_match_category = category
-                    best_match_confidence = confidence
+            if keyword in search_text and confidence >= best_conf:
+                best_cat = category
+                best_conf = confidence
 
-        return best_match_category, best_match_confidence
+        return best_cat, best_conf

@@ -34,10 +34,18 @@ class FeatureEngineer:
         total_count = 1
         
         for sess in recent_sessions:
-            # sess fields: id, start_time, end_time, primary_process, primary_category, scroll_velocity, input_density, has_text_selection, calculated_state, attention_risk_score
-            all_densities.append(sess[6])
-            all_scrolls.append(sess[5])
-            if sess[4] == "Core_Tool":
+            if isinstance(sess, dict):
+                density = sess["input_density"]
+                scroll = sess["scroll_velocity"]
+                category = sess["primary_category"]
+            else:
+                density = sess[6]
+                scroll = sess[5]
+                category = sess[4]
+
+            all_densities.append(density)
+            all_scrolls.append(scroll)
+            if category == "Core_Tool":
                 categories_count += 1
             total_count += 1
             

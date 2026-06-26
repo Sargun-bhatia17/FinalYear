@@ -17,7 +17,17 @@ class ApiServer:
             "ml_model_status": "Idle",
             "session_count": 0,
             "recent_sessions": [],
-            "current_alert": None
+            "current_alert": None,
+            "tracker_status": {
+                "mode": "live",
+                "window_ok": False,
+                "input_ok": False,
+                "last_flush_at": None,
+                "flush_count": 0,
+                "events_written": 0,
+                "retry_queue_size": 0,
+                "last_error": None,
+            },
         }
         self.loop = None
         self.server = None
@@ -81,10 +91,11 @@ class ApiServer:
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
         
-        start_server = websockets.serve(self.handler, self.host, self.port)
-        self.server = self.loop.run_until_complete(start_server)
-        print(f"WebSocket server listening on ws://{self.host}:{self.port}")
-        
+        async def start_websocket():
+            self.server = await websockets.serve(self.handler, self.host, self.port)
+            print(f"WebSocket server listening on ws://{self.host}:{self.port}")
+
+        self.loop.run_until_complete(start_websocket())
         self.loop.run_forever()
 
     def stop(self):
