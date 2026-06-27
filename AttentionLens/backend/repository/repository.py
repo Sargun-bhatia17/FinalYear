@@ -267,6 +267,19 @@ class DataRepository:
         row = self._conn.execute("SELECT COUNT(*) FROM behavioral_sessions").fetchone()
         return int(row[0])
 
+    def count_valid_sessions(self) -> int:
+        """
+        Returns the count of sessions usable for ML training.
+
+        Excludes sessions with calculated_state='Unknown', which serve as a proxy
+        for DataQuality.INSUFFICIENT (unknown sessions have insufficient signal
+        and would add noise to the training set).
+        """
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM behavioral_sessions WHERE calculated_state != 'Unknown'"
+        ).fetchone()
+        return int(row[0])
+
     def get_pending_unknown_sessions(self) -> list[dict]:
         """
         Fetches all sessions with calculated_state='Unknown', ordered oldest-first.

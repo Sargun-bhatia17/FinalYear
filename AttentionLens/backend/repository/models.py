@@ -160,3 +160,62 @@ class RuleResult:
         if not (0.0 <= self.risk_score_override <= 1.0):
             object.__setattr__(self, "risk_score_override",
                                max(0.0, min(1.0, self.risk_score_override)))
+
+
+# ── ML lifecycle models ────────────────────────────────────────────────────────
+
+class ModelNotTrainedError(Exception):
+    """Raised by AttentionClassifier.predict() when called before a model is loaded."""
+
+
+@dataclass
+class ModelMetadata:
+    """
+    Persisted training run summary written to metadata.json beside the .joblib file.
+
+    Attributes:
+        trained_at:        UTC datetime of the training run.
+        session_count:     Number of sessions used in the training set.
+        class_accuracies:  Per-class accuracy dict keyed by state label.
+    """
+
+    trained_at:        datetime
+    session_count:     int
+    class_accuracies:  dict[str, float]
+
+
+@dataclass
+class RetriggerPolicy:
+    """
+    Policy parameters that govern when the retraining daemon fires.
+
+    Attributes:
+        min_new_rows:          Minimum new sessions accumulated since last train.
+        max_days_since_training: Maximum calendar days before a forced retrain.
+    """
+
+    min_new_rows:           int = 100
+    max_days_since_training: int = 7
+
+
+@dataclass
+class FusionResult:
+    """
+    Rich output of FusionEngine.score() — carries the blended state, risk score,
+    and the weights and signals used to produce it.
+
+    Attributes:
+        final_state:    The authoritative attention state label.
+        final_risk:     Blended risk score in [0.0, 1.0].
+        ml_weight:      Weight assigned to the ML signal (0.0 when cold-start).
+        rule_weight:    Weight assigned to the rule signal (always >= RULE_WEIGHT_FLOOR).
+        rule_result:    The full RuleResult from the rule engine.
+        ml_confidence:  Max-probability from the classifier's predict_proba output.
+    """
+
+    final_state:    str
+    final_risk:     float
+    ml_weight:      float
+    rule_weight:    float
+    rule_result:    "RuleResult"
+    ml_confidence:  float
