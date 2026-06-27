@@ -1,100 +1,61 @@
-import React from "react";
-import { AttentionState } from "../../hooks/useAttentionSocket";
-import { Clock, Terminal, ChevronRight } from "lucide-react";
-import "./Timeline.css";
+// src/components/Timeline/Timeline.tsx
+// Horizontal bar chart. Each block width = (duration_min / 1440) * 100.
+// Tooltip on hover: primary_process + start/end times.
+import React, { useState } from "react";
+import { Clock } from "lucide-react";
+import type { TimelineProps, SessionBlock } from "../../types";
 
-interface TimelineProps {
-  state: AttentionState;
+const STATE_COLORS: Record<string, string> = {
+  Deep_Work:       "#008080",
+  Pondering:       "#60a5fa",
+  Passive_Leisure: "#FFBF00",
+  Active_Meeting:  "#a78bfa",
+  Idle_Away:       "#d1d5db",
+  Unknown:         "#e5e7eb",
+};
+
+function durationMin(s: SessionBlock): number {
+  const ms = new Date(s.end_time).getTime() - new Date(s.start_time).getTime();
+  return Math.max(1, ms / 60_000);
 }
 
-export const Timeline: React.FC<TimelineProps> = ({ state }) => {
-  const getTimelineDotColor = (s: string) => {
-    switch (s) {
-      case "Deep Work": return "var(--color-deep-work)";
-      case "Pondering": return "var(--color-pondering)";
-      case "Passive Leisure": return "var(--color-leisure)";
-      default: return "var(--color-idle)";
-    }
-  };
+function fmt(iso: string): string {
+  return iso.split(" ")[1]?.slice(0, 5) ?? iso;
+}
 
-  const formatTime = (timeStr: string) => {
-    try {
-      const parts = timeStr.split(" ");
-      if (parts.length > 1) {
-        return parts[1]; // Returns HH:MM:SS
-      }
-      return timeStr;
-    } catch {
-      return timeStr;
-    }
-  };
+export const Timeline: React.FC<TimelineProps> = ({ sessions }) => {
+  const [hovered, setHovered] = useState<SessionBlock | null>(null);
 
   return (
-    <div className="glass-card timeline-card">
-      <div className="timeline-header">
-        <div className="title-section">
-          <Clock className="header-icon" />
-          <h3>Session Timeline</h3>
-        </div>
-        <span className="count-label">{state.session_count} total sessions</span>
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+      <div className="flex items-center gap-2 mb-4">
+        <Clock size={14} className="text-gray-400" />
+        <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Today's Timeline</h2>
       </div>
 
-      <div className="timeline-list-container">
-        {state.recent_sessions.length === 0 ? (
-          <div className="empty-timeline">
-            <Terminal size={32} />
-            <p>Waiting for minute aggregates to compile...</p>
-          </div>
-        ) : (
-          <div className="timeline-list">
-            {state.recent_sessions.map((sess) => {
-              const [
-                id,
-                start_time,
-                , // end_time
-                primary_process,
-                primary_category,
-                scroll_velocity,
-                input_density,
-                , // has_text_selection
-                calculated_state,
-                attention_risk_score
-              ] = sess;
-
+      {sessions.length === 0 ? (
+        <p className="text-sm text-gray-400 text-center py-6">No sessions recorded today.</p>
+      ) : (
+        <>
+          <div className="flex h-8 rounded-lg overflow-hidden gap-px relative">
+            {sessions.map((s, i) => {
+              const w = Math.max(0.3, (durationMin(s) / 1440) * 100);
               return (
-                <div className="timeline-item" key={id}>
-                  <div className="timeline-left">
-                    <span className="timestamp">{formatTime(start_time)}</span>
-                    <div 
-                      className="timeline-dot" 
-                      style={{ 
-                        backgroundColor: getTimelineDotColor(calculated_state),
-                        boxShadow: `0 0 10px ${getTimelineDotColor(calculated_state)}`
-                      }}
-                    />
-                  </div>
-                  <div className="timeline-body">
-                    <div className="timeline-row">
-                      <div className="process-info">
-                        <span className="process-tag">{primary_process}</span>
-                        <ChevronRight size={12} className="separator" />
-                        <span className="category-tag">{primary_category.replace("_", " ")}</span>
-                      </div>
-                      <span className="state-text" style={{ color: getTimelineDotColor(calculated_state) }}>
-                        {calculated_state}
-                      </span>
-                    </div>
-                    <div className="timeline-row details">
-                      <span>Inputs: <strong>{input_density}</strong> · Scroll: <strong>{Math.round(scroll_velocity)} px/s</strong></span>
-                      <span className="risk-pill">Risk: <strong>{Math.round(attention_risk_score * 100)}%</strong></span>
-                    </div>
-                  </div>
-                </div>
+                <div key={i} style={{ width: `${w}%`, background: STATE_COLORS[s.state] ?? "#e5e7eb" }}
+                  className="transition-opacity hover:opacity-80 cursor-pointer"
+                  onMouseEnter={() => setHovered(s)} onMouseLeave={() => setHovered(null)} />
               );
             })}
           </div>
-        )}
-      </div>
+          {hovered && (
+            <div className="mt-3 bg-gray-50 rounded-xl px-4 py-2 text-xs text-gray-600 flex gap-4">
+              <span className="font-semibold">{hovered.primary_process}</span>
+              <span>{fmt(hovered.start_time)} – {fmt(hovered.end_time)}</span>
+              <span className="text-gray-400">{hovered.state.replace(/_/g, " ")}</span>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 };

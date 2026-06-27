@@ -1,34 +1,22 @@
+// src/components/AlertBanner/AlertBanner.tsx
+// Conditionally rendered when risk > 0.75 for 3+ consecutive minutes.
 import React from "react";
-import { AttentionState } from "../../hooks/useAttentionSocket";
-import { AlertOctagon, X } from "lucide-react";
-import "./AlertBanner.css";
+import { AlertTriangle } from "lucide-react";
+import type { AlertBannerProps } from "../../types";
 
-interface AlertBannerProps {
-  state: AttentionState;
-}
+const THREE_MINUTES_MS = 3 * 60 * 1000;
 
-export const AlertBanner: React.FC<AlertBannerProps> = ({ state }) => {
-  const alert = state.current_alert;
-  
-  if (!alert) return null;
+export const AlertBanner: React.FC<AlertBannerProps> = ({ risk, alert, sinceMs }) => {
+  const shouldShow = risk >= 0.75 && sinceMs >= THREE_MINUTES_MS;
+  if (!shouldShow || !alert) return null;
 
   return (
-    <div className="alert-banner-container glass-card border-glow">
-      <div className="alert-icon-wrapper">
-        <AlertOctagon className="alert-icon animate-pulse" />
-      </div>
-      <div className="alert-content">
-        <div className="alert-title-row">
-          <h4>{alert.alert_trigger.replace(/_/g, " ")}</h4>
-          <span className="badge">Action Required</span>
-        </div>
-        <p className="cause"><strong>Diagnosis:</strong> {alert.primary_cause}</p>
-        <p className="prompt">{alert.actionable_prompt}</p>
-        {alert.suggested_action && (
-          <div className="actions-row">
-            <button className="action-button">{alert.suggested_action}</button>
-          </div>
-        )}
+    <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl p-4 mb-4
+                    animate-pulse-subtle shadow-sm">
+      <AlertTriangle className="text-red-500 shrink-0 mt-0.5" size={20} />
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-red-800 mb-1">{alert.actionable_prompt}</p>
+        <p className="text-xs text-red-600">{alert.suggested_action}</p>
       </div>
     </div>
   );

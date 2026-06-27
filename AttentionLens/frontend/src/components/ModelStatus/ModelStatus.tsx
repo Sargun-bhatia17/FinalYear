@@ -1,99 +1,50 @@
+// src/components/ModelStatus/ModelStatus.tsx
+// Polls /health every 30s. Displays training badge + session count.
 import React from "react";
-import { AttentionState } from "../../hooks/useAttentionSocket";
-import { BrainCircuit, Info } from "lucide-react";
-import "./ModelStatus.css";
+import { BrainCircuit } from "lucide-react";
+import type { ModelStatusProps } from "../../types";
 
-interface ModelStatusProps {
-  state: AttentionState;
+function fmtDate(iso: string | null): string {
+  if (!iso) return "Never";
+  try { return new Date(iso).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" }); }
+  catch { return iso; }
 }
 
-export const ModelStatus: React.FC<ModelStatusProps> = ({ state }) => {
-  const N = state.session_count;
-  
-  // Calculate trust weights according to fusion formulas
-  const w_ml = Math.min(0.8, N / 500);
-  const w_rule = 1.0 - w_ml;
-  
-  const w_ml_percent = Math.round(w_ml * 100);
-  const w_rule_percent = Math.round(w_rule * 100);
-  
-  // Determine model status phrase
-  let modelStatusText = "Rule Engine Cold Start";
-  if (N >= 500) {
-    modelStatusText = "Fully Trained (ML Lead)";
-  } else if (N >= 50) {
-    modelStatusText = "Growing (Linear Build-up)";
-  }
-
-  // Calculate sessions progress towards retraining (100 rows trigger)
-  const retrainProgress = N % 100;
+export const ModelStatus: React.FC<ModelStatusProps> = ({ health, summary }) => {
+  const online   = health?.status === "ok";
+  const trained  = summary?.model_last_trained ?? null;
+  const sessions = summary?.model_session_count ?? 0;
+  const N        = sessions;
+  const w_ml     = Math.round(Math.min(0.8, N / 500) * 100);
+  const w_rule   = 100 - w_ml;
 
   return (
-    <div className="glass-card status-card">
-      <div className="status-header">
-        <BrainCircuit className="status-icon" />
-        <h3>Local Random Forest Status</h3>
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+      <div className="flex items-center gap-2 mb-4">
+        <BrainCircuit size={14} className="text-gray-400" />
+        <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Model Status</h2>
+        <span className={`ml-auto text-[10px] font-semibold px-2 py-0.5 rounded-full
+          ${online ? "bg-teal-50 text-teal-700 ring-1 ring-teal-200" : "bg-gray-100 text-gray-400"}`}>
+          {online ? "Online" : "Offline"}
+        </span>
       </div>
-      
-      <div className="status-body">
-        {/* Status label */}
-        <div className="status-row label-value">
-          <span className="label">Pipeline Mode:</span>
-          <span className="value status-highlight">{modelStatusText}</span>
-        </div>
 
-        {/* Retraining count tracker */}
-        <div className="retrain-progress-section">
-          <div className="label-row">
-            <span>Retraining Daemon Progress</span>
-            <span>{retrainProgress} / 100 sessions</span>
+      <p className="text-xs text-gray-500 mb-4">
+        Trained {fmtDate(trained)} · <span className="font-semibold text-gray-700">{sessions}</span> sessions
+      </p>
+
+      {[{ label: "Rule Engine (W_rule)", pct: w_rule, color: "bg-blue-400" },
+        { label: "ML Classifier (W_ml)",  pct: w_ml,   color: "bg-teal-400" }].map(({ label, pct, color }) => (
+        <div key={label} className="mb-3">
+          <div className="flex justify-between text-xs text-gray-500 mb-1">
+            <span>{label}</span><span className="font-semibold">{pct}%</span>
           </div>
-          <div className="progress-bar-bg">
-            <div 
-              className="progress-bar-fill ml-fill" 
-              style={{ width: `${retrainProgress}%` }}
-            />
+          <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+            <div className={`h-full rounded-full ${color} transition-all duration-700`}
+              style={{ width: `${pct}%` }} />
           </div>
         </div>
-
-        {/* Trust blending bars */}
-        <div className="weights-section">
-          <h4>Fusion Weight Blending</h4>
-          
-          <div className="weight-item">
-            <div className="label-row font-xs">
-              <span>Rule Engine Weight (W_rule)</span>
-              <span>{w_rule_percent}%</span>
-            </div>
-            <div className="progress-bar-bg">
-              <div 
-                className="progress-bar-fill rule-fill" 
-                style={{ width: `${w_rule_percent}%` }}
-              />
-            </div>
-          </div>
-
-          <div className="weight-item">
-            <div className="label-row font-xs">
-              <span>ML Classifier Weight (W_ml)</span>
-              <span>{w_ml_percent}%</span>
-            </div>
-            <div className="progress-bar-bg">
-              <div 
-                className="progress-bar-fill ml-fill" 
-                style={{ width: `${w_ml_percent}%` }}
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="info-box">
-          <Info size={14} className="info-icon" />
-          <p>
-            The 20% Rule Floor is permanent. Key overrides (DSA Exception, Comic Loophole) will always be respected regardless of ML model confidence.
-          </p>
-        </div>
-      </div>
+      ))}
     </div>
   );
 };
