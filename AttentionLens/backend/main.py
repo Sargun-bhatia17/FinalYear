@@ -1,6 +1,8 @@
 import datetime
+import logging
 import time
 
+from backend.config.settings import settings
 from backend.repository.repository import DataRepository
 from backend.repository.models import SessionRecord, VALID_STATES
 from backend.logic.rule_engine import PONDERING_SOFT_ALERT_MIN
@@ -16,11 +18,14 @@ from backend.logic.ml_model import AttentionClassifier
 from backend.logic.retraining_daemon import RetrainingDaemon
 from backend.logic.fusion_engine import FusionEngine
 from backend.server.api_server import ApiServer
+from backend.utils.lifecycle import ShutdownCoordinator
+
+logger = logging.getLogger(__name__)
 
 
 class MainApp:
     def __init__(self):
-        print("Initializing AttentionLens Backend Engine...")
+        logger.info("Initializing AttentionLens Backend Engine...")
 
         self.repository = DataRepository()
 
@@ -30,7 +35,7 @@ class MainApp:
         self.fusion_engine = FusionEngine(self.repository)
 
         self.retraining_daemon = RetrainingDaemon(self.repository, self.classifier)
-        self.api_server = ApiServer(port=8421)
+        self.api_server = ApiServer(repository=self.repository, port=settings.api_port)
 
         self.tracker = Tracker(
             repository=self.repository,
@@ -51,7 +56,16 @@ class MainApp:
         self.retraining_daemon.start()
         self.api_server.start()
 
-        print("AttentionLens background threads started successfully.")
+        # Register signal handlers for graceful shutdown
+        coordinator = ShutdownCoordinator(
+            tracker=self.tracker,
+            retraining_daemon=self.retraining_daemon,
+            api_server=self.api_server,
+            repository=self.repository,
+        )
+        coordinator.register()
+
+        logger.info("AttentionLens background threads started successfully.")
 
         try:
             recent = self.repository.get_all_sessions(limit=15)
@@ -73,7 +87,7 @@ class MainApp:
             self.api_server.update_state("recent_sessions", recent_tuples)
             self.api_server.update_state("session_count", self.repository.get_session_count())
         except Exception as e:
-            print(f"Failed to seed initial state: {e}")
+            logger.warning("Failed to seed initial state: %s", e)
 
         try:
             self.run_loop()
@@ -81,11 +95,12 @@ class MainApp:
             self.stop()
 
     def stop(self):
-        print("Shutting down AttentionLens backend...")
+        logger.info("Shutting down AttentionLens backend...")
         self.tracker.stop()
         self.retraining_daemon.stop()
         self.api_server.stop()
-        print("Shutdown complete.")
+        logger.info("Shutdown complete.")
+
 
     def _on_raw_event(self, snapshot: RawEventSnapshot) -> None:
         """Called by Tracker every flush_interval seconds."""
@@ -267,9 +282,13 @@ class MainApp:
             # Reset flag so the alert doesn't fire every minute after threshold
             self.rule_engine.soft_alert_triggered = False
 
-        self.api_server.update_state("attention_score", final_risk)
-        self.api_server.update_state("calculated_state", final_state)
-        self.api_server.update_state("active_category", primary_category)
+        self.api_server.update_state("attention_score",   final_risk)
+        self.api_server.update_state("calculated_state",  final_state)
+        self.api_server.update_state("active_category",   primary_category)
+        self.api_server.update_state("active_process",    primary_proc)
+        self.api_server.update_state("active_title",       primary_title)
+        self.api_server.update_state("fired_protocol",    rule_result.fired_protocol)
+        self.api_server.update_state("data_quality",      feat_vector.data_quality.value)
 
         try:
             recent = self.repository.get_all_sessions(limit=15)
@@ -291,9 +310,15 @@ class MainApp:
             self.api_server.update_state("recent_sessions", recent_tuples)
             self.api_server.update_state("session_count", self.repository.get_session_count())
         except Exception as e:
-            print(f"Failed to update dashboard history list: {e}")
+            logger.error("Failed to update dashboard history list: %s", e)
 
 
 if __name__ == "__main__":
+    from backend.utils.logger import configure_logging
+    configure_logging(
+        level=settings.log_level,
+        max_bytes=settings.log_max_bytes,
+        backup_count=settings.log_backup_count,
+    )
     app = MainApp()
     app.start()

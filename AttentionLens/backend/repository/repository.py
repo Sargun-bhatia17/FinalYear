@@ -32,6 +32,7 @@ from typing import Optional
 
 from backend.repository.db_init import initialize, get_db_path, get_seeds_path
 from backend.repository.models import SessionRecord, RawEventRecord
+from backend.utils.errors import retry_on_failure, DatabaseLockedError
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,7 @@ class DataRepository:
 
     # ── Raw Window Events ─────────────────────────────────────────────────────
 
+    @retry_on_failure(retries=3, base_delay=0.5, exceptions=(sqlite3.OperationalError,))
     def insert_raw_event(
         self,
         process: str,
@@ -167,6 +169,7 @@ class DataRepository:
 
     # ── Behavioral Sessions ───────────────────────────────────────────────────
 
+    @retry_on_failure(retries=3, base_delay=0.5, exceptions=(sqlite3.OperationalError,))
     def insert_session(self, session: SessionRecord) -> int:
         """
         Inserts a completed 60-second behavioral session.
@@ -200,6 +203,7 @@ class DataRepository:
             s.calculated_state, s.attention_risk_score,
         )
 
+    @retry_on_failure(retries=3, base_delay=0.5, exceptions=(sqlite3.OperationalError,))
     def update_session_state(self, session_id: int, new_state: str, risk_score: Optional[float] = None) -> None:
         """
         Retroactively corrects the calculated_state of a past session.
@@ -223,6 +227,7 @@ class DataRepository:
         self._conn.commit()
         logger.info("Rewrote session %d state -> %s (risk -> %s)", session_id, new_state, risk_score)
 
+    @retry_on_failure(retries=3, base_delay=0.5, exceptions=(sqlite3.OperationalError,))
     def get_all_sessions(self, limit: int = 100) -> list[dict]:
         """
         Fetches the most recent behavioral sessions, newest first.

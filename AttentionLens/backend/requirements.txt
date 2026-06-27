@@ -1,7 +1,9 @@
 # Python sidecar requirements
 pynput>=1.7.6
 pywin32>=306; sys_platform == 'win32'
-websockets>=11.0.3
 scikit-learn>=1.3.0
 joblib>=1.3.2
 numpy>=1.24.3
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+pydantic-settings>=2.2.0
